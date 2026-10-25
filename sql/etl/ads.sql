@@ -18,7 +18,7 @@ FROM dws_trade_topic_1d;
 -- 用户复购分析：全量维度下，消费订单数 >= 2 视为复购
 INSERT INTO ads_user_repurchase
 SELECT
-    DATE '2026-09-30'                                AS dt,
+    '2026-09-30'                                     AS dt,
     COUNT(DISTINCT user_id)                          AS total_buyer,
     COUNT(DISTINCT CASE WHEN order_count >= 2 THEN user_id END) AS repurchase_buyer,
     CASE WHEN COUNT(DISTINCT user_id) > 0

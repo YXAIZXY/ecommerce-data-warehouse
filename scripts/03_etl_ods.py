@@ -14,7 +14,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import pandas as pd
 
 import config
-from db import get_conn, row_count, truncate_tables
+from db import get_conn, row_count, truncate_tables, load_dataframe, close_conn
 
 # 每张源表 -> (csv, ODS 表, 时间戳列, 收窄 INT 列, 业务日期列)
 TABLES = {
@@ -54,10 +54,7 @@ def load_one(conn, meta) -> None:
     else:
         df["etl_date"] = pd.to_datetime(config.ETL_DATE).date()
 
-    conn.register("tmp_load", df)
-    conn.execute(f"INSERT INTO {meta['table']} SELECT * FROM tmp_load")
-    conn.fetchall()
-    conn.unregister("tmp_load")
+    load_dataframe(conn, meta["table"], df)
 
 
 def main() -> None:
@@ -67,7 +64,7 @@ def main() -> None:
         load_one(conn, meta)
         n = row_count(conn, meta["table"])
         print(f"   {meta['table']:20s} 加载 {n} 行")
-    conn.close()
+    close_conn(conn)
     print("[03] ODS 层加载完成")
 
 

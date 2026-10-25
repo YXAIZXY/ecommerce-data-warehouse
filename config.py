@@ -31,12 +31,13 @@ ETL_DATE = "2026-09-30"
 
 # 数据库连接：优先 MySQL，未配置则回退 DuckDB
 # 切 MySQL 时：pip install pymysql 后，将 USE_MYSQL 置 True 并填下方连接串
+# 默认 False（DuckDB 免安装，克隆即跑）；本机已装 MySQL 时可置 True（已实测跑通）
 USE_MYSQL = False
 MYSQL_CONF = {
     "host": "127.0.0.1",
     "port": 3306,
     "user": "root",
-    "password": "your_password",
+    "password": "root123",
     "database": "ecommerce_dw",
 }
 

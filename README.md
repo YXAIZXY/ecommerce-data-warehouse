@@ -3,7 +3,7 @@
 一个完整的离线数仓实战项目：从业务数据造数 → ODS → DWD → DWS → ADS 四层建模，
 用标准 SQL 完成清洗、去重、维度退化、主题聚合与核心指标计算，输出可视化报表。
 
-**技术栈**：Python · SQL · MySQL 8.0（对标）· DuckDB（本地验证引擎）· Pandas · Matplotlib
+**技术栈**：Python · SQL · MySQL 8.0（已实测）· DuckDB（免安装验证引擎）· Pandas · Matplotlib
 
 ---
 
@@ -86,18 +86,27 @@ ecommerce-data-warehouse/
 # 1. 安装依赖
 pip install -r requirements.txt
 
-# 2. 造数 + 建表
+# 2. 造数
 python scripts/01_generate_data.py
+
+# 3. 建表（按 config.USE_MYSQL 自动选 DuckDB / MySQL 的 DDL）
 python scripts/02_create_tables.py
 
-# 3. 一键跑完四层 ETL（等价于依次执行 03~06）
+# 4. 一键跑完四层 ETL（依次执行 03~06）
 python scripts/07_scheduler.py
 
-# 4. 生成报表与图表
+# 5. 生成报表与图表
 python scripts/08_report.py
 ```
 
 跑完后在 `output/` 目录查看 `report.md`（数据日报）与 `charts.png`（GMV 趋势 + 热销榜）。
+
+**两种引擎任选其一**（改 `config.py` 里的 `USE_MYSQL`）：
+
+| USE_MYSQL | 引擎 | 适用场景 |
+| --- | --- | --- |
+| `False`（默认） | DuckDB | 免安装、零依赖，克隆即跑，适合快速验证 |
+| `True` | MySQL 8.0 | 生产/面试对标，需先安装并启动 MySQL（见下） |
 
 ---
 
@@ -116,9 +125,28 @@ python scripts/08_report.py
 
 ## 六、技术选型说明
 
-- **本地验证引擎用 DuckDB**：免安装、OLAP 分析、标准 SQL，适合离线开发验证；生产/面试对标 **MySQL 8.0**。
-- **切 MySQL**：`pip install pymysql` 后，把 `config.py` 中 `USE_MYSQL=True` 并填连接信息即可（DDL/ETL 均为标准 SQL，方言差异见下）。
-- **方言差异点**：MySQL 建表用 `AUTO_INCREMENT` 自增主键、金额用 `DECIMAL`、日期函数用 `DATE_FORMAT`；Hive/Spark 用 `INSERT OVERWRITE` 分区表。本工程已尽量保持方言中立。
+- **双引擎设计**：同一套 ETL 脚本，通过 `config.USE_MYSQL` 切换 **DuckDB**（本地验证）与 **MySQL 8.0**（生产对标），均实测跑通，四层行数与指标完全一致。
+- **金额精度**：MySQL 用 `DECIMAL(12,2)`；DuckDB 版为对接 pandas 用 `DOUBLE`（生产环境一律 `DECIMAL` 规避浮点误差）。
+- **保留字处理**：`rank` 是 MySQL 保留字，列名统一用 `top_rank` 规避。
+- **方言差异点**：MySQL 建表用 `AUTO_INCREMENT` 自增主键、日期函数 `DATE_FORMAT`；Hive/Spark 用 `INSERT OVERWRITE` 分区表。ETL 核心 SQL 已尽量保持方言中立。
+
+### MySQL 8.0 本地安装与启动（Windows）
+
+```bash
+# 安装（winget，需管理员）
+winget install --id Oracle.MySQL --accept-source-agreements --accept-package-agreements
+
+# 初始化数据目录（root 初始无密码）
+mysqld --initialize-insecure --datadir="C:/Users/Administrator/mysql-data"
+
+# 启动服务（或直接双击项目附带的 start_mysql.bat）
+mysqld --datadir="C:/Users/Administrator/mysql-data" --port=3306
+
+# 设置密码并建库
+mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY 'root123'; CREATE DATABASE ecommerce_dw CHARACTER SET utf8mb4;"
+```
+
+然后在 `config.py` 中置 `USE_MYSQL = True`，即可在 MySQL 上跑通全流程。
 
 ---
 

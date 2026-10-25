@@ -1,4 +1,4 @@
-"""08 报表：查询 ADS 层指标，输出控制台报表 + 图表 + Markdown 报告。"""
+"""08 报表：查询 ADS 层指标，输出控制台报表 + 图表 + Markdown 报告（引擎无关）。"""
 import sys
 from pathlib import Path
 
@@ -14,11 +14,15 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 import config
-from db import get_conn, scalar
+from db import get_conn, scalar, read_df, close_conn
 
 
-def latest_dt(conn, table: str, col: str = "dt") -> str:
+def latest_dt(conn, table: str, col: str = "dt"):
     return scalar(conn, f"SELECT MAX({col}) FROM {table}")
+
+
+def _as_date_str(v) -> str:
+    return v.strftime("%Y-%m-%d") if hasattr(v, "strftime") else str(v)
 
 
 def print_summary(conn) -> None:
@@ -26,49 +30,34 @@ def print_summary(conn) -> None:
     print("【ADS 核心指标汇总】")
     print("=" * 56)
 
-    total = conn.execute("""
-        SELECT SUM(gmv), SUM(order_count)
-        FROM ads_trade_day_stats
-    """).fetchall()[0]
-    distinct_payers = scalar(
-        conn, "SELECT COUNT(DISTINCT user_id) FROM dwd_payment_info"
-    )
-    print(f"  累计 GMV        : {total[0]:,.2f} 元")
-    print(f"  累计订单量      : {int(total[1]):,} 单")
-    print(f"  累计支付用户数  : {distinct_payers:,} 人（去重）")
+    gmv = scalar(conn, "SELECT SUM(gmv) FROM ads_trade_day_stats")
+    orders = scalar(conn, "SELECT SUM(order_count) FROM ads_trade_day_stats")
+    payers = scalar(conn, "SELECT COUNT(DISTINCT user_id) FROM dwd_payment_info")
+    conv = scalar(conn, "SELECT AVG(pay_conversion_rate) FROM ads_trade_day_stats")
+    aov = scalar(conn, "SELECT AVG(avg_order_amount) FROM ads_trade_day_stats")
 
-    rate = conn.execute("""
-        SELECT AVG(pay_conversion_rate), AVG(avg_order_amount)
-        FROM ads_trade_day_stats
-    """).fetchall()[0]
-    print(f"  平均支付转化率  : {rate[0] * 100:.2f}%")
-    print(f"  平均客单价      : {rate[1]:,.2f} 元")
+    print(f"  累计 GMV        : {gmv:,.2f} 元")
+    print(f"  累计订单量      : {int(orders):,} 单")
+    print(f"  累计支付用户数  : {int(payers):,} 人（去重）")
+    print(f"  平均支付转化率  : {conv * 100:.2f}%")
+    print(f"  平均客单价      : {aov:,.2f} 元")
 
-    rep = conn.execute(
-        "SELECT total_buyer, repurchase_buyer, repurchase_rate "
-        "FROM ads_user_repurchase ORDER BY dt DESC LIMIT 1"
-    ).fetchall()[0]
-    if rep:
-        print(f"  复购人数        : {int(rep[1]):,} / {int(rep[0]):,}")
-        print(f"  复购率          : {rep[2] * 100:.2f}%")
+    rep = read_df(conn, "SELECT total_buyer, repurchase_buyer, repurchase_rate "
+                       "FROM ads_user_repurchase ORDER BY dt DESC LIMIT 1")
+    if len(rep):
+        r = rep.iloc[0]
+        print(f"  复购人数        : {int(r['repurchase_buyer']):,} / {int(r['total_buyer']):,}")
+        print(f"  复购率          : {r['repurchase_rate'] * 100:.2f}%")
 
 
-def top_products(conn, dt, limit: int = 10) -> pd.DataFrame:
-    return conn.execute(
-        f"""
-        SELECT rank, product_id, product_name, category, sale_quantity, sale_amount
-        FROM ads_product_top
-        WHERE dt = ? AND rank <= ?
-        ORDER BY rank
-        """, [dt, limit]
-    ).df()
+def top_products(conn, dt: str, limit: int = 10) -> pd.DataFrame:
+    return read_df(conn,
+        f"SELECT top_rank, product_id, product_name, category, sale_quantity, sale_amount "
+        f"FROM ads_product_top WHERE dt = '{dt}' AND top_rank <= {limit} ORDER BY top_rank")
 
 
-def make_charts(conn, dt) -> None:
-    # 1) 每日 GMV 趋势
-    daily = conn.execute(
-        "SELECT dt, gmv, order_count FROM ads_trade_day_stats ORDER BY dt"
-    ).df()
+def make_charts(conn, dt: str) -> None:
+    daily = read_df(conn, "SELECT dt, gmv, order_count FROM ads_trade_day_stats ORDER BY dt")
     daily["dt"] = pd.to_datetime(daily["dt"])
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
@@ -82,7 +71,6 @@ def make_charts(conn, dt) -> None:
     for lbl in ax.get_xticklabels():
         lbl.set_rotation(45)
 
-    # 2) 热销 TOP10
     top = top_products(conn, dt)
     ax = axes[1]
     ax.barh(top["product_name"].astype(str)[::-1], top["sale_quantity"][::-1],
@@ -95,11 +83,9 @@ def make_charts(conn, dt) -> None:
     print(f"   图表已保存：{config.OUTPUT_DIR / 'charts.png'}")
 
 
-def write_markdown(conn, dt) -> None:
-    daily = conn.execute(
-        "SELECT dt, gmv, order_count, pay_conversion_rate "
-        "FROM ads_trade_day_stats ORDER BY dt"
-    ).df()
+def write_markdown(conn, dt: str) -> None:
+    daily = read_df(conn, "SELECT dt, gmv, order_count, pay_conversion_rate "
+                          "FROM ads_trade_day_stats ORDER BY dt")
     daily["dt"] = pd.to_datetime(daily["dt"])
     top = top_products(conn, dt, limit=10)
 
@@ -117,7 +103,7 @@ def write_markdown(conn, dt) -> None:
     ]
     for _, r in top.iterrows():
         lines.append(
-            f"| {int(r['rank'])} | {r['product_name']} | {r['category']} "
+            f"| {int(r['top_rank'])} | {r['product_name']} | {r['category']} "
             f"| {int(r['sale_quantity'])} | {r['sale_amount']:,.2f} |"
         )
     lines.append("")
@@ -129,14 +115,14 @@ def write_markdown(conn, dt) -> None:
 
 def main() -> None:
     conn = get_conn()
-    dt = latest_dt(conn, "ads_trade_day_stats")
+    dt = _as_date_str(latest_dt(conn, "ads_trade_day_stats"))
     print_summary(conn)
     print("\n【热销商品 TOP10】")
     print(top_products(conn, dt).to_string(index=False))
     print()
     make_charts(conn, dt)
     write_markdown(conn, dt)
-    conn.close()
+    close_conn(conn)
     print("\n[08] 报表生成完成")
 
 

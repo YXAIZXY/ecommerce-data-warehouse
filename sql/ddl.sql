@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS ads_user_repurchase (
 -- 商品热销 TOP 榜
 CREATE TABLE IF NOT EXISTS ads_product_top (
     dt            DATE,
-    rank          BIGINT,
+    top_rank      BIGINT,
     product_id    BIGINT,
     product_name  VARCHAR,
     category      VARCHAR,
